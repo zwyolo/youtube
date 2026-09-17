@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reload Detector</title>
+<style>
+  :root{
+    --bg:#f5f6f8;
+    --panel:#ffffff;
+    --ink:#1a1d21;
+    --muted:#6a7178;
+    --line:#e3e6ea;
+    --live:#0a7d4f;        /* running / steady */
+    --alert:#c0392b;       /* a reload just happened */
+    --accent:#2f6fb0;
+    --shadow:0 1px 3px rgba(16,20,26,.08),0 8px 24px rgba(16,20,26,.05);
+  }
+  :root:not([data-theme="light"]){
+    @media (prefers-color-scheme: dark){
+      --bg:#0e1116; --panel:#161a21; --ink:#e8ebef; --muted:#9aa3ad;
+      --line:#252b34; --live:#3ddc97; --alert:#ff6b5e; --accent:#6ab0ff;
+      --shadow:0 1px 3px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e1116; --panel:#161a21; --ink:#e8ebef; --muted:#9aa3ad;
+    --line:#252b34; --live:#3ddc97; --alert:#ff6b5e; --accent:#6ab0ff;
+    --shadow:0 1px 3px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+    display:flex; align-items:center; justify-content:center;
+    padding:clamp(16px,4vw,48px);
+  }
+  .wrap{width:100%; max-width:860px}
+
+  .mono{font-family:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace; font-variant-numeric:tabular-nums}
+
+  /* ---- hero readout ---- */
+  .hero{
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    box-shadow:var(--shadow); padding:clamp(20px,4vw,40px);
+    text-align:center; position:relative; overflow:hidden;
+  }
+  .hero::before{
+    content:""; position:absolute; inset:0 0 auto 0; height:3px;
+    background:var(--live); transition:background .2s;
+  }
+  .hero.flash::before{background:var(--alert)}
+  .clock{
+    font-size:clamp(48px,13vw,120px); line-height:1; font-weight:600;
+    letter-spacing:-.02em; color:var(--live); transition:color .2s;
+  }
+  .hero.flash .clock{color:var(--alert)}
+  .clock .d{color:var(--muted); font-weight:400}
+  .hero .cap{margin-top:14px; font-size:clamp(13px,2.4vw,16px); color:var(--muted)}
+  .hero .cap b{color:var(--ink); font-weight:600}
+
+  .pill{
+    display:inline-flex; align-items:center; gap:7px;
+    margin-top:18px; padding:6px 14px; border-radius:999px;
+    border:1px solid var(--line); font-size:13px; color:var(--muted);
+    background:var(--bg);
+  }
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--live)}
+  .pill.reload{color:var(--alert); border-color:color-mix(in srgb,var(--alert) 40%,var(--line))}
+  .pill.reload .dot{background:var(--alert)}
+
+  /* ---- stat grid ---- */
+  .grid{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:16px;
+  }
+  @media(max-width:640px){.grid{grid-template-columns:repeat(2,1fr)}}
+  .cell{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:16px 16px 14px;
+  }
+  .cell .k{font-size:12.5px; color:var(--muted); margin-bottom:8px}
+  .cell .v{font-size:clamp(18px,3.4vw,24px); font-weight:600; letter-spacing:-.01em}
+  .cell .v.small{font-size:15px; font-weight:500}
+
+  /* ---- history ---- */
+  .hist{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    margin-top:16px; overflow:hidden;
+  }
+  .hist .head{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:14px 18px; border-bottom:1px solid var(--line);
+  }
+  .hist .head .title{font-weight:600; font-size:15px}
+  .hist .head .verdict{font-size:13px; color:var(--muted)}
+  table{width:100%; border-collapse:collapse; font-size:14px}
+  th,td{text-align:left; padding:10px 18px}
+  th{font-size:12px; font-weight:500; color:var(--muted)}
+  tbody tr{border-top:1px solid var(--line)}
+  td.num{text-align:right}
+  .scroll{max-height:260px; overflow-y:auto}
+  .empty{padding:22px 18px; color:var(--muted); font-size:14px}
+
+  .actions{display:flex; gap:10px; margin-top:16px; flex-wrap:wrap}
+  button{
+    font:inherit; font-size:14px; cursor:pointer; padding:9px 16px;
+    border-radius:10px; border:1px solid var(--line); background:var(--panel);
+    color:var(--ink); transition:border-color .15s,background .15s;
+  }
+  button:hover{border-color:var(--accent)}
+  button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .foot{margin-top:14px; font-size:12.5px; color:var(--muted); line-height:1.5}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero" id="hero">
+    <div class="clock mono" id="clock">00:00:00<span class="d">.0</span></div>
+    <div class="cap">Time since this page loaded — <b>resets to 0 if the page reloads</b><br>页面加载后经过的时间，一旦刷新即归零</div>
+    <div class="pill" id="loadType"><span class="dot"></span><span id="loadTypeText">Checking load type…</span></div>
+  </div>
+
+  <div class="grid">
+    <div class="cell"><div class="k">Loaded at (fixed)</div><div class="v small mono" id="loadedAt">—</div></div>
+    <div class="cell"><div class="k">Now (live)</div><div class="v small mono" id="now">—</div></div>
+    <div class="cell"><div class="k">Loads (this browser)</div><div class="v mono" id="totalLoads">—</div></div>
+    <div class="cell"><div class="k">Loads (this session)</div><div class="v mono" id="sessionLoads">—</div></div>
+  </div>
+
+  <div class="hist">
+    <div class="head">
+      <span class="title">Load history</span>
+      <span class="verdict" id="verdict"></span>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>#</th><th>Timestamp</th><th class="num">Gap from previous</th></tr></thead>
+        <tbody id="histBody"></tbody>
+      </table>
+      <div class="empty" id="histEmpty" hidden>No history stored (this player may block localStorage — the counter above still works).</div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="resetBtn">Clear history &amp; counters</button>
+  </div>
+
+  <div class="foot">
+    How to read it: leave this page on the player. If the big counter keeps climbing and never returns to 0, the page is <b>not</b> reloading — its content is only being updated in place. If it snaps back to 00:00:00 on a regular beat, that beat is the auto-refresh interval, listed under Load history.
+  </div>
+</div>
+
+<script>
+(function(){
+  var t0 = performance.now();
+  var loadTs = Date.now();
+  var HIST_KEY = "reload-detector-history";
+  var TOTAL_KEY = "reload-detector-total";
+
+  function safeGet(store, key){ try{ return store.getItem(key); }catch(e){ return null; } }
+  function safeSet(store, key, val){ try{ store.setItem(key, val); return true; }catch(e){ return false; } }
+
+  /* ---- load type from Navigation Timing ---- */
+  (function(){
+    var type = "unknown";
+    try{
+      var nav = performance.getEntriesByType("navigation")[0];
+      if(nav && nav.type){ type = nav.type; }
+      else if(performance.navigation){
+        type = ["navigate","reload","back_forward","reserved"][performance.navigation.type] || "unknown";
+      }
+    }catch(e){}
+    var el = document.getElementById("loadType");
+    var txt = document.getElementById("loadTypeText");
+    if(type === "reload"){
+      el.classList.add("reload");
+      txt.textContent = "This load was a RELOAD (browser reported type: reload)";
+    }else if(type === "navigate"){
+      txt.textContent = "This load was a fresh navigation (type: navigate)";
+    }else if(type === "back_forward"){
+      txt.textContent = "Restored from history (type: back_forward)";
+    }else{
+      txt.textContent = "Load type unavailable on this player";
+    }
+  })();
+
+  /* ---- persistent counters + history ---- */
+  var storageOk = true;
+  var total = parseInt(safeGet(localStorage, TOTAL_KEY) || "0", 10) + 1;
+  if(!safeSet(localStorage, TOTAL_KEY, String(total))) storageOk = false;
+
+  var session = parseInt(safeGet(sessionStorage, "rd-session") || "0", 10) + 1;
+  safeSet(sessionStorage, "rd-session", String(session));
+
+  var hist = [];
+  try{ hist = JSON.parse(safeGet(localStorage, HIST_KEY) || "[]"); if(!Array.isArray(hist)) hist=[]; }catch(e){ hist=[]; }
+  hist.push(loadTs);
+  if(hist.length > 60) hist = hist.slice(-60);
+  if(!safeSet(localStorage, HIST_KEY, JSON.stringify(hist))) storageOk = false;
+
+  document.getElementById("totalLoads").textContent = storageOk ? total : "n/a";
+  document.getElementById("sessionLoads").textContent = session;
+  document.getElementById("loadedAt").textContent = fmtClock(new Date(loadTs));
+
+  /* if this isn't the first load ever, briefly flash the hero to signal a reload just occurred */
+  if(total > 1 || session > 1){
+    var hero = document.getElementById("hero");
+    hero.classList.add("flash");
+    setTimeout(function(){ hero.classList.remove("flash"); }, 1500);
+  }
+
+  renderHistory(hist, storageOk);
+
+  /* ---- live elapsed + wall clock ---- */
+  var clock = document.getElementById("clock");
+  var nowEl = document.getElementById("now");
+  function tick(){
+    var ms = performance.now() - t0;
+    clock.innerHTML = fmtElapsed(ms);
+    nowEl.textContent = fmtClock(new Date());
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  /* ---- reset ---- */
+  document.getElementById("resetBtn").addEventListener("click", function(){
+    try{ localStorage.removeItem(HIST_KEY); localStorage.removeItem(TOTAL_KEY); }catch(e){}
+    try{ sessionStorage.removeItem("rd-session"); }catch(e){}
+    location.reload();
+  });
+
+  /* ---- helpers ---- */
+  function pad(n,w){ n=String(n); while(n.length<(w||2)) n="0"+n; return n; }
+  function fmtElapsed(ms){
+    var tenths = Math.floor(ms/100)%10;
+    var s = Math.floor(ms/1000);
+    var hh = Math.floor(s/3600), mm = Math.floor((s%3600)/60), ss = s%60;
+    return pad(hh)+":"+pad(mm)+":"+pad(ss)+'<span class="d">.'+tenths+'</span>';
+  }
+  function fmtClock(d){
+    return pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds());
+  }
+  function fmtGap(ms){
+    var s = ms/1000;
+    if(s < 90) return s.toFixed(1)+" s";
+    var m = s/60;
+    if(m < 90) return m.toFixed(1)+" min";
+    return (m/60).toFixed(1)+" h";
+  }
+
+  function renderHistory(hist, ok){
+    var body = document.getElementById("histBody");
+    var empty = document.getElementById("histEmpty");
+    var verdict = document.getElementById("verdict");
+    if(!ok || hist.length === 0){
+      empty.hidden = false; verdict.textContent = "";
+      return;
+    }
+    var rows = "";
+    for(var i = hist.length - 1; i >= 0; i--){
+      var gap = i > 0 ? fmtGap(hist[i]-hist[i-1]) : "—";
+      rows += "<tr><td class='mono'>"+(i+1)+"</td><td class='mono'>"+
+              new Date(hist[i]).toLocaleString()+"</td><td class='num mono'>"+gap+"</td></tr>";
+    }
+    body.innerHTML = rows;
+
+    /* verdict: are recent gaps roughly constant? */
+    if(hist.length < 2){
+      verdict.textContent = "1 load so far — no reload detected yet";
+    }else{
+      var gaps = [];
+      for(var j=1;j<hist.length;j++) gaps.push(hist[j]-hist[j-1]);
+      var recent = gaps.slice(-5);
+      var avg = recent.reduce(function(a,b){return a+b;},0)/recent.length;
+      var consistent = recent.every(function(g){ return Math.abs(g-avg) < Math.max(1500, avg*0.15); });
+      if(consistent && recent.length >= 2){
+        verdict.textContent = "auto-refreshing ≈ every " + fmtGap(avg);
+      }else{
+        verdict.textContent = hist.length + " loads recorded (irregular)";
+      }
+    }
+  }
+})();
+</script>
+</body>
+</html>
